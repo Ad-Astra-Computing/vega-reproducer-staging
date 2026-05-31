@@ -1,0 +1,51 @@
+# Vega reproducer. Rebuilds a build from its provenance on a fresh GitHub runner
+# under this repo's OIDC identity and attests the result, feeding the vega-repro
+# lane. Triggered by the Vega control plane via workflow_dispatch.
+name: Reproduce
+on:
+  workflow_dispatch:
+    inputs:
+      flake_ref: { description: "Flake reference", required: true }
+      attr: { description: "Attribute path", required: true }
+      rev: { description: "Locked revision", required: true }
+      expect_store_path: { description: "Expected store path (optional)", required: false, default: "" }
+      expect_narhash: { description: "Expected narHash (optional)", required: false, default: "" }
+      runner: { description: "Runner image", required: false, default: "ubuntu-latest", type: choice, options: ["ubuntu-latest", "ubuntu-22.04"] }
+permissions:
+  id-token: write
+  contents: read
+concurrency:
+  group: reproduce-${{ inputs.flake_ref }}-${{ inputs.attr }}-${{ inputs.rev }}-${{ inputs.runner }}
+  cancel-in-progress: false
+jobs:
+  reproduce:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # Check out the agent code (pinned), not this repo; this repo holds only
+      # the workflow. persist-credentials:false so no token is left on disk.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: Ad-Astra-Computing/vega-agent
+          ref: a53910ea6aca6cd61f7aa8781fc9bf601301c0af
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            sandbox = true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+      - run: npm ci
+      - name: Reproduce and attest
+        env:
+          # Hardcoded (not an input) so the OIDC token only ever reaches Vega.
+          # This reproducer attests to staging; the production reproducer points
+          # at https://vega-cache.dev.
+          VEGA_URL: "https://vega-cache-staging.ad-astra-computing-inc.workers.dev"
+          VEGA_FLAKE_REF: ${{ inputs.flake_ref }}
+          VEGA_ATTR: ${{ inputs.attr }}
+          VEGA_REV: ${{ inputs.rev }}
+          VEGA_EXPECT_STORE_PATH: ${{ inputs.expect_store_path }}
+          VEGA_EXPECT_NARHASH: ${{ inputs.expect_narhash }}
+        run: node_modules/.bin/tsx agent/reproduce.ts
