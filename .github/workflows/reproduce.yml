@@ -1,6 +1,7 @@
-# Vega reproducer. Rebuilds a build from its provenance on a fresh GitHub runner
-# under this repo's OIDC identity and attests the result, feeding the vega-repro
-# lane. Triggered by the Vega control plane via workflow_dispatch.
+# Vega reproducer (staging). Rebuilds a build from its provenance on a fresh
+# GitHub runner under this repo's OIDC identity and attests the result to the
+# staging control plane, feeding the vega-repro lane. Triggered by the Vega
+# control plane via workflow_dispatch. For macOS reproduction set runner: macos-latest.
 name: Reproduce
 on:
   workflow_dispatch:
@@ -11,10 +12,16 @@ on:
       dir: { description: "Subflake directory (optional)", required: false, default: "" }
       expect_store_path: { description: "Expected store path (optional)", required: false, default: "" }
       expect_narhash: { description: "Expected narHash (optional)", required: false, default: "" }
-      runner: { description: "Runner image", required: false, default: "ubuntu-latest", type: choice, options: ["ubuntu-latest", "ubuntu-22.04"] }
+      runner:
+        description: "Runner to reproduce on"
+        required: false
+        default: "ubuntu-latest"
+        type: choice
+        options: ["ubuntu-latest", "ubuntu-22.04", "macos-latest", "macos-14"]
 permissions:
-  id-token: write
+  id-token: write # GitHub Actions OIDC, so Vega can verify the runner identity
   contents: read
+# Serialize duplicate reproductions of the same target; do not cancel an in-flight one.
 concurrency:
   group: reproduce-${{ inputs.flake_ref }}-${{ inputs.dir }}-${{ inputs.attr }}-${{ inputs.rev }}-${{ inputs.runner }}
   cancel-in-progress: false
@@ -22,22 +29,44 @@ jobs:
   reproduce:
     runs-on: ${{ inputs.runner }}
     steps:
-      # Check out the agent code (pinned), not this repo; this repo holds only
-      # the workflow. persist-credentials:false so no token is left on disk.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Constrain runner
+        # Fail closed unless the label is a known GitHub-hosted ephemeral runner, so
+        # a reproduction that gates the signing key cannot be steered onto
+        # operator-chosen hardware. Passed via env, never inlined: no shell injection.
+        env:
+          RUNNER_INPUT: ${{ inputs.runner }}
+        run: |
+          case "$RUNNER_INPUT" in
+            ubuntu-latest|ubuntu-24.04|ubuntu-22.04|macos-latest|macos-15|macos-14|macos-13) ;;
+            *) echo "refusing to reproduce on non-allowlisted runner '$RUNNER_INPUT'" >&2; exit 1 ;;
+          esac
+      # Check out the agent code (pinned), not this repo; this repo holds only the
+      # workflow. persist-credentials:false so no token is left on disk.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: Ad-Astra-Computing/vega-agent
-          ref: bcb0fa68476f6621fb455800e696758b5a965094
+          ref: 7c37e25ed66161c3711d05f2648ad93eb81aa3b7 # v0.13.0
           persist-credentials: false
-      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
+          # Pin the Nix release the installer fetches, so this signing-gate lane
+          # cannot be shifted by a change to the installer's default version.
+          source-tag: v3.21.0
           extra-conf: |
             experimental-features = nix-command flakes
             sandbox = true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+            # A build that cannot be sandboxed must fail, not run unsandboxed. Nix's
+            # default sandbox-fallback would silently drop isolation if sandbox setup
+            # failed, and this reproducer builds attacker-chosen flake refs whose byte
+            # agreement gates the master signing key.
+            sandbox-fallback = false
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
-      - run: npm ci
+      - name: Install agent deps
+        run: npm ci
       - name: Reproduce and attest
         env:
           # Hardcoded (not an input) so the OIDC token only ever reaches Vega.
