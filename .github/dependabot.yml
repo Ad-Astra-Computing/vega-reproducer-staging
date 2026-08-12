@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions current so pinning stays secure without going stale.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
