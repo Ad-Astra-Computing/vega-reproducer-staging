@@ -1,0 +1,62 @@
+# Keep the pinned vega-agent current.
+#
+# reproduce.yml checks the agent out by commit SHA, which is deliberate: this
+# lane gates the master signing key, so what it runs must be an exact reviewed
+# commit rather than a tag someone can move. The cost is that nothing watches
+# it. Dependabot reads `uses:` and cannot see a `ref:` inside a checkout step,
+# so the pin sat five releases behind for a month and the reproductions that
+# failed on it looked like ordinary build failures.
+#
+# This opens a pull request when vega-agent publishes a newer release. A pull
+# request rather than a push, because the point of the SHA is that a human
+# looked at it, and because a scheduled job that merely FAILS is something
+# nobody sees: that is how the pin got stale in the first place.
+name: Agent pin
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open a pull request when the pin is behind
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wf=.github/workflows/reproduce.yml
+          current=$(grep -oE '^          ref: [0-9a-f]{40}' "$wf" | awk '{print $2}')
+          tag=$(gh release view --repo Ad-Astra-Computing/vega-agent --json tagName --jq .tagName)
+          # Dereference: an annotated tag's ref points at the tag object, not the commit.
+          want=$(gh api "repos/Ad-Astra-Computing/vega-agent/git/ref/tags/$tag" --jq '.object.sha')
+          kind=$(gh api "repos/Ad-Astra-Computing/vega-agent/git/ref/tags/$tag" --jq '.object.type')
+          if [ "$kind" = tag ]; then
+            want=$(gh api "repos/Ad-Astra-Computing/vega-agent/git/tags/$want" --jq '.object.sha')
+          fi
+          if [ "$current" = "$want" ]; then
+            echo "pin is current: $tag ($current)"
+            exit 0
+          fi
+          echo "pin $current is behind $tag ($want)"
+          branch="agent-pin-$tag"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          sed -i "s|^          ref: [0-9a-f]\{40\}.*|          ref: $want # $tag|" "$wf"
+          git add "$wf"
+          git commit -m "Pin the reproducer to vega-agent $tag"
+          git push -f origin "$branch"
+          # Reuse an open PR for this tag rather than stacking one per run.
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "Pin the reproducer to vega-agent $tag" \
+              --body "vega-agent released $tag. This lane gates the master signing key, so read the agent diff before merging: https://github.com/Ad-Astra-Computing/vega-agent/compare/$current...$want"
+          fi
