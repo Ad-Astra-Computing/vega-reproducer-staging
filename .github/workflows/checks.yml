@@ -1,0 +1,64 @@
+# This repository holds a workflow and nothing else, so until now nothing
+# exercised it: a mistake surfaced when the control plane dispatched a real
+# reproduction, and looked like an ordinary build failure. These checks run
+# without building anything, so they cost seconds rather than runner hours.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 1 * *" # monthly, to catch drift in something we do not control
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Workflows are valid
+        run: |
+          set -euo pipefail
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+      # The pinned agent is a different repository, so nothing here notices when
+      # its interface moves. Check the contract rather than assume it.
+      - name: The pinned agent satisfies the workflow's contract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wf=.github/workflows/reproduce.yml
+          ref=$(grep -oE '^          ref: [0-9a-f]{40}' "$wf" | awk '{print $2}')
+          echo "pinned agent: $ref"
+          gh api "repos/Ad-Astra-Computing/vega-agent/commits/$ref" --jq '.sha' > /dev/null \
+            || { echo "the pinned commit does not exist in vega-agent" >&2; exit 1; }
+
+          src=$(gh api "repos/Ad-Astra-Computing/vega-agent/contents/agent/reproduce.ts?ref=$ref" \
+                  --jq '.content' | base64 -d) \
+            || { echo "agent/reproduce.ts is missing at the pinned commit" >&2; exit 1; }
+
+          # Anything the agent REQUIRES must be set by the workflow, or every
+          # reproduction fails at startup. The reverse (the workflow setting
+          # something the agent ignores) is dead config, reported but not fatal.
+          required=$(printf '%s' "$src" | grep -oE 'requireEnv\("VEGA_[A-Z_]+"\)' \
+                     | grep -oE 'VEGA_[A-Z_]+' | sort -u)
+          provided=$(grep -oE '^          VEGA_[A-Z_]+:' "$wf" | tr -d ' :' | sort -u)
+          echo "required by agent: $(echo "$required" | tr '\n' ' ')"
+          echo "set by workflow:   $(echo "$provided" | tr '\n' ' ')"
+
+          missing=$(comm -23 <(printf '%s\n' "$required") <(printf '%s\n' "$provided") || true)
+          if [ -n "$missing" ]; then
+            echo "::error::the agent requires $missing, which this workflow does not set"
+            exit 1
+          fi
+
+          read_by_agent=$(printf '%s' "$src" | grep -oE 'VEGA_[A-Z_]+' | sort -u)
+          unused=$(comm -23 <(printf '%s\n' "$provided") <(printf '%s\n' "$read_by_agent") || true)
+          [ -n "$unused" ] && echo "::warning::the workflow sets $unused, which the pinned agent never reads"
+          echo "contract ok"
