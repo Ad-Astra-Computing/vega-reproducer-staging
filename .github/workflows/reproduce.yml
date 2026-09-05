@@ -12,6 +12,12 @@ on:
       dir: { description: "Subflake directory (optional)", required: false, default: "" }
       expect_store_path: { description: "Expected store path (optional)", required: false, default: "" }
       expect_narhash: { description: "Expected narHash (optional)", required: false, default: "" }
+      # The candidate this job is for. Optional, so a hand-run reproduction still
+      # works, and so the control plane can start sending it without this repo
+      # having to change first. Without it a build that can never resolve (an
+      # attribute the flake does not provide) is re-dispatched for ever, because
+      # nothing can record the failure against the candidate that caused it.
+      hash: { description: "Candidate store-path hash (optional)", required: false, default: "" }
       runner:
         description: "Runner to reproduce on"
         required: false
@@ -45,7 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Ad-Astra-Computing/vega-agent
-          ref: 7c37e25ed66161c3711d05f2648ad93eb81aa3b7 # v0.13.0
+          ref: fc8fe29c4931896322991f8b88dd738263a58744 # v0.18.0
           persist-credentials: false
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
@@ -84,4 +90,5 @@ jobs:
           VEGA_DIR: ${{ inputs.dir }}
           VEGA_EXPECT_STORE_PATH: ${{ inputs.expect_store_path }}
           VEGA_EXPECT_NARHASH: ${{ inputs.expect_narhash }}
+          VEGA_HASH: ${{ inputs.hash }}
         run: node_modules/.bin/tsx agent/reproduce.ts
