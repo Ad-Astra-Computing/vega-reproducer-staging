@@ -46,12 +46,32 @@ jobs:
             ubuntu-latest|ubuntu-24.04|ubuntu-22.04|macos-latest|macos-15|macos-14|macos-13) ;;
             *) echo "refusing to reproduce on non-allowlisted runner '$RUNNER_INPUT'" >&2; exit 1 ;;
           esac
-      # Check out the agent code (pinned), not this repo; this repo holds only the
-      # workflow. persist-credentials:false so no token is left on disk.
+      # The pin lives in agent.pin, not inline here, because GITHUB_TOKEN may not
+      # write a workflow file and the watcher that keeps it current has no other
+      # token. Read it from a scratch checkout of this repo.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .pin
+          persist-credentials: false
+      - name: Read the pinned agent commit
+        id: pin
+        run: |
+          set -euo pipefail
+          sha=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' .pin/agent.pin)
+          # Fail rather than resolve to a default branch: an empty or malformed
+          # pin would run unreviewed agent code in the lane that gates signing.
+          case "$sha" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "agent.pin is not a 40-character commit sha: '$sha'" >&2; exit 1 ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "pinned agent: $sha"
+      # Check out the agent code over the scratch checkout above.
+      # persist-credentials:false so no token is left on disk.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Ad-Astra-Computing/vega-agent
-          ref: fc8fe29c4931896322991f8b88dd738263a58744 # v0.18.0
+          ref: ${{ steps.pin.outputs.sha }}
           persist-credentials: false
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22

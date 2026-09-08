@@ -1,11 +1,11 @@
 # Keep the pinned vega-agent current.
 #
-# reproduce.yml checks the agent out by commit SHA, which is deliberate: this
-# lane gates the master signing key, so what it runs must be an exact reviewed
-# commit rather than a tag someone can move. The cost is that nothing watches
-# it. Dependabot reads `uses:` and cannot see a `ref:` inside a checkout step,
-# so the pin sat five releases behind for a month and the reproductions that
-# failed on it looked like ordinary build failures.
+# reproduce.yml checks the agent out by the commit SHA in agent.pin, which is
+# deliberate: this lane gates the master signing key, so what it runs must be an
+# exact reviewed commit rather than a tag someone can move. The cost is that
+# nothing watches it. Dependabot reads `uses:` and cannot see a checked-out
+# commit, so the pin sat five releases behind for a month and the reproductions
+# that failed on it looked like ordinary build failures.
 #
 # This opens a pull request when vega-agent publishes a newer release. A pull
 # request rather than a push, because the point of the SHA is that a human
@@ -32,8 +32,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          wf=.github/workflows/reproduce.yml
-          current=$(grep -oE '^          ref: [0-9a-f]{40}' "$wf" | awk '{print $2}')
+          current=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' agent.pin)
           tag=$(gh release view --repo Ad-Astra-Computing/vega-agent --json tagName --jq .tagName)
           # Dereference: an annotated tag's ref points at the tag object, not the commit.
           want=$(gh api "repos/Ad-Astra-Computing/vega-agent/git/ref/tags/$tag" --jq '.object.sha')
@@ -50,8 +49,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          sed -i "s|^          ref: [0-9a-f]\{40\}.*|          ref: $want # $tag|" "$wf"
-          git add "$wf"
+          printf '%s # %s\n' "$want" "$tag" > agent.pin
+          git add agent.pin
           git commit -m "Pin the reproducer to vega-agent $tag"
           git push -f origin "$branch"
           # Reuse an open PR for this tag rather than stacking one per run.
