@@ -46,13 +46,19 @@ jobs:
           fi
           echo "pin $current is behind $tag ($want)"
           branch="agent-pin-$tag"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
-          printf '%s # %s\n' "$want" "$tag" > agent.pin
-          git add agent.pin
-          git commit -m "Pin the reproducer to vega-agent $tag"
-          git push -f origin "$branch"
+          # Commit through the contents API rather than with git. main requires
+          # signed commits, and a commit pushed by the runner is unsigned, so the
+          # pull request could never merge. GitHub signs what the API writes.
+          base=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')
+          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/heads/$branch" -f "sha=$base" >/dev/null 2>&1 \
+            || gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" \
+                 -f "sha=$base" -F force=true >/dev/null
+          blob=$(gh api "repos/$GITHUB_REPOSITORY/contents/agent.pin?ref=$branch" --jq '.sha')
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/agent.pin" \
+            -f "message=pin the reproducer to vega-agent $tag" \
+            -f "content=$(printf '%s # %s\n' "$want" "$tag" | base64 -w0)" \
+            -f "branch=$branch" -f "sha=$blob" --jq '.commit.sha' >/dev/null
           # Reuse an open PR for this tag rather than stacking one per run.
           if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
             gh pr create --base main --head "$branch" \
