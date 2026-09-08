@@ -97,7 +97,10 @@ jobs:
         with:
           node-version: "24"
       - name: Install agent deps
-        run: npm ci
+        # No install script, because this job holds the OIDC token that gates
+        # signing. The binary esbuild's script fetches is already an optional
+        # dependency here.
+        run: npm ci --omit=dev --ignore-scripts
       - name: Reproduce and attest
         env:
           # Hardcoded (not an input) so the OIDC token only ever reaches Vega.
