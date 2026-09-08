@@ -28,13 +28,22 @@ jobs:
 
       # The pinned agent is a different repository, so nothing here notices when
       # its interface moves. Check the contract rather than assume it.
+      - name: The pin is a commit sha
+        run: |
+          set -euo pipefail
+          sha=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' agent.pin)
+          case "$sha" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::agent.pin is not a 40-character commit sha: '$sha'"; exit 1 ;;
+          esac
+
       - name: The pinned agent satisfies the workflow's contract
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           wf=.github/workflows/reproduce.yml
-          ref=$(grep -oE '^          ref: [0-9a-f]{40}' "$wf" | awk '{print $2}')
+          ref=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' agent.pin)
           echo "pinned agent: $ref"
           gh api "repos/Ad-Astra-Computing/vega-agent/commits/$ref" --jq '.sha' > /dev/null \
             || { echo "the pinned commit does not exist in vega-agent" >&2; exit 1; }
