@@ -18,6 +18,12 @@ on:
       # attribute the flake does not provide) is re-dispatched for ever, because
       # nothing can record the failure against the candidate that caused it.
       hash: { description: "Candidate store-path hash (optional)", required: false, default: "" }
+      # The dispatch this job answers. Optional for the same reason as hash: a
+      # hand-run reproduction has none, and the control plane can start sending
+      # it without this repo changing first. A failure report carrying it is
+      # applied only to the dispatch it names, so one that arrives after the
+      # candidate was re-dispatched changes nothing.
+      attempt: { description: "Dispatch attempt id (optional)", required: false, default: "" }
       runner:
         description: "Runner to reproduce on"
         required: false
@@ -114,4 +120,5 @@ jobs:
           VEGA_EXPECT_STORE_PATH: ${{ inputs.expect_store_path }}
           VEGA_EXPECT_NARHASH: ${{ inputs.expect_narhash }}
           VEGA_HASH: ${{ inputs.hash }}
+          VEGA_ATTEMPT: ${{ inputs.attempt }}
         run: node_modules/.bin/tsx agent/reproduce.ts
