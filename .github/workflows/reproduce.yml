@@ -29,7 +29,7 @@ on:
         required: false
         default: "ubuntu-latest"
         type: choice
-        options: ["ubuntu-latest", "ubuntu-22.04", "macos-latest", "macos-14"]
+        options: ["ubuntu-latest", "ubuntu-22.04", "macos-latest", "macos-15"]
 permissions:
   id-token: write # GitHub Actions OIDC, so Vega can verify the runner identity
   contents: read
@@ -49,7 +49,7 @@ jobs:
           RUNNER_INPUT: ${{ inputs.runner }}
         run: |
           case "$RUNNER_INPUT" in
-            ubuntu-latest|ubuntu-24.04|ubuntu-22.04|macos-latest|macos-15|macos-14|macos-13) ;;
+            ubuntu-latest|ubuntu-24.04|ubuntu-22.04|macos-latest|macos-15|macos-13) ;;
             *) echo "refusing to reproduce on non-allowlisted runner '$RUNNER_INPUT'" >&2; exit 1 ;;
           esac
       # The pin lives in agent.pin, not inline here, because GITHUB_TOKEN may not
